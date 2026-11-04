@@ -45,10 +45,13 @@ jobs:
           cp signing/srk-vpn-debug.keystore ~/.android/debug.keystore
 
       - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: "9.7.1"      # official Gradle download; engine's wrapper jars are not used
+          validate-wrappers: false
 
       - name: Build APK
         working-directory: engine
-        run: ./gradlew :main:assembleSkeletonOvpn2Release -PicsopenvpnDebugSign --stacktrace
+        run: gradle :main:assembleSkeletonOvpn2Release -PicsopenvpnDebugSign --stacktrace
 
       - name: Collect APK
         run: |
