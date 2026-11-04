@@ -19,3 +19,6 @@ s = re.sub(r'versionNameSuffix = "-o2"', 'versionNameSuffix = ""', s, count=1)
 open(p, 'w').write(s)
 PY
 grep -n 'applicationId\|abiFilters\|versionName' "$G"
+
+# Packaging the native OpenVPN/OpenSSL libraries needs more than Gradle's default 512 MB heap.
+printf '\norg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n' >> "$ENGINE/gradle.properties"
