@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SRK VPN — built on the ics-openvpn engine (GPLv2, Arne Schwabe) using its "skeleton" flavor.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:label="SRK VPN"
+        android:usesCleartextTraffic="true"
+        tools:replace="android:label"
+        tools:ignore="AllowBackup,GoogleAppIndexingWarning">
+
+        <activity
+            android:name="in.shazverse.srkvpn.MainActivity"
+            android:exported="true"
+            android:label="SRK VPN"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Kept from the upstream skeleton: engine code refers to these activities. -->
+        <activity
+            android:exported="true"
+            android:name="de.blinkt.openvpn.activities.NotImplemented"
+            tools:ignore="ExportedActivity" />
+
+        <activity-alias
+            android:exported="true"
+            android:name="de.blinkt.openvpn.activities.LogWindow"
+            android:targetActivity="de.blinkt.openvpn.activities.NotImplemented" />
+
+        <activity-alias
+            android:exported="true"
+            android:name="de.blinkt.openvpn.activities.Req"
+            android:targetActivity="de.blinkt.openvpn.activities.NotImplemented" />
+
+    </application>
+
+</manifest>
