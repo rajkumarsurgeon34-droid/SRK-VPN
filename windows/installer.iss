@@ -40,10 +40,6 @@ Name: "{group}\SRK VPN"; Filename: "{app}\SRKVPN.exe"; IconFilename: "{app}\srkv
 Name: "{autodesktop}\SRK VPN"; Filename: "{app}\SRKVPN.exe"; IconFilename: "{app}\srkvpn.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "msiexec.exe"; \
-  Parameters: "/i ""{tmp}\openvpn.msi"" ADDLOCAL=OpenVPN,Drivers,Drivers.TAPWindows6 /passive /norestart"; \
-  StatusMsg: "Installing the OpenVPN engine and network driver..."; \
-  Flags: waituntilterminated; Check: NeedsOpenVpn
 Filename: "{app}\SRKVPN.exe"; Description: "Open SRK VPN"; Flags: nowait postinstall skipifsilent shellexec
 
 [UninstallRun]
@@ -53,4 +49,28 @@ Filename: "{cmd}"; Parameters: "/c taskkill /im SRKVPN.exe /f"; Flags: runhidden
 function NeedsOpenVpn: Boolean;
 begin
   Result := not FileExists(ExpandConstant('{commonpf64}\OpenVPN\bin\openvpn.exe'));
+end;
+
+procedure InstallOpenVpn;
+var
+  Code: Integer;
+  Msi: String;
+begin
+  Msi := ExpandConstant('{tmp}\openvpn.msi');
+  WizardForm.StatusLabel.Caption := 'Installing the OpenVPN engine and network driver...';
+  { Engine + TAP-Windows driver only; if this OpenVPN version names its features differently,
+    fall back to its standard install. }
+  Exec('msiexec.exe', '/i "' + Msi + '" ADDLOCAL=OpenVPN,Drivers,Drivers.TAPWindows6 /passive /norestart',
+       '', SW_SHOW, ewWaitUntilTerminated, Code);
+  if (Code <> 0) and (Code <> 3010) and NeedsOpenVpn then
+    Exec('msiexec.exe', '/i "' + Msi + '" /passive /norestart', '', SW_SHOW, ewWaitUntilTerminated, Code);
+  if NeedsOpenVpn then
+    MsgBox('The OpenVPN engine could not be installed (code ' + IntToStr(Code) + ').' + #13#10 +
+           'Install OpenVPN from openvpn.net, then open SRK VPN again.', mbError, MB_OK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and NeedsOpenVpn then
+    InstallOpenVpn;
 end;

@@ -57,6 +57,20 @@ jobs:
           Get-Item deps\openvpn.msi | Format-List Name, Length
           "OPENVPN_MSI=$url" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Show OpenVPN installer features
+        shell: pwsh
+        run: |
+          $wi = New-Object -ComObject WindowsInstaller.Installer
+          $db = $wi.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $wi, @((Resolve-Path deps\openvpn.msi).Path, 0))
+          $v = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @("SELECT Feature, Feature_Parent, Level FROM Feature"))
+          $v.GetType().InvokeMember("Execute", "InvokeMethod", $null, $v, $null)
+          while ($r = $v.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $v, $null)) {
+            $f = $r.GetType().InvokeMember("StringData", "GetProperty", $null, $r, 1)
+            $p = $r.GetType().InvokeMember("StringData", "GetProperty", $null, $r, 2)
+            $l = $r.GetType().InvokeMember("IntegerData", "GetProperty", $null, $r, 3)
+            Write-Host "FEATURE $f (parent: $p, level: $l)"
+          }
+
       - name: Build installer
         shell: pwsh
         run: |
