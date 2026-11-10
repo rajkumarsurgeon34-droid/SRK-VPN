@@ -139,7 +139,11 @@
     current: store.get('current', null), // { id, cc, country, host }
     homeIp: store.get('homeIp', null),
   };
-  const ATTEMPT_MS = 25000, MAX_TRIES = 6;
+  // Apps that can measure server latency (Windows) try the fastest reachable servers first
+  // and give up on a silent server sooner.
+  const HAS_PROBE = typeof B.probe === 'function';
+  const ATTEMPT_MS = HAS_PROBE ? 15000 : 25000, MAX_TRIES = 6, PROBE_COUNT = 14;
+  st.lat = {}; st.probing = null;
 
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600); }
   function showErr(msg) { $('#errbox').innerHTML = msg ? `<div class="err">${esc(msg)}</div>` : ''; }
@@ -185,7 +189,7 @@
         </div>
         <div class="servers">${st.open.has(c.cc) ? c.servers.slice(0, 30).map(s => `
           <button class="srv ${st.current && st.current.id === s.id && st.view !== 'off' ? 'current' : ''}" data-act="server" data-id="${esc(s.id)}">
-            <span class="h">${esc(s.host)}<small>${mbps(s.speed)} · ${s.sessions} users · up ${Math.max(1, Math.round(s.uptime / 86400000))}d</small></span>
+            <span class="h">${esc(s.host)}<small>${st.lat[s.id] > 0 ? st.lat[s.id] + ' ms · ' : st.lat[s.id] === -1 ? 'no reply · ' : ''}${mbps(s.speed)} · ${s.sessions} users · up ${Math.max(1, Math.round(s.uptime / 86400000))}d</small></span>
             <span class="tag">${esc(s.proto)} ${esc(s.port)}</span>
           </button>`).join('') : ''}</div>
       </div>`).join('');
@@ -195,7 +199,24 @@
   function connectCountry(cc) {
     const c = st.byCountry.find(x => x.cc === cc);
     if (!c) return;
-    startAttempt(c, c.servers.slice(0, MAX_TRIES));
+    if (!HAS_PROBE) return startAttempt(c, c.servers.slice(0, MAX_TRIES));
+    clearAttempt();
+    showErr('');
+    const candidates = c.servers.slice(0, PROBE_COUNT);
+    st.probing = { cc: c.cc, candidates };
+    setView('connecting', `Finding the fastest ${c.country} server…`, `Checking ${candidates.length} servers`);
+    B.probe(JSON.stringify(candidates.map(s => s.id)));
+    render();
+  }
+  function onProbe(d) {
+    const p = st.probing;
+    if (!p) return;
+    st.probing = null;
+    Object.assign(st.lat, d.results || {});
+    const c = st.byCountry.find(x => x.cc === p.cc);
+    const ok = p.candidates.filter(s => st.lat[s.id] > 0).sort((a, b) => st.lat[a.id] - st.lat[b.id]);
+    const queue = ok.length ? ok : p.candidates;   // nothing answered: still try the best-scored ones
+    startAttempt(c, queue.slice(0, MAX_TRIES));
   }
   function connectServer(id) {
     const s = st.servers.find(x => x.id === id);
@@ -235,6 +256,7 @@
   function clearAttempt() { if (st.attempt) clearTimeout(st.attempt.timer); st.attempt = null; }
 
   function disconnect() {
+    st.probing = null;
     clearAttempt();
     B.disconnect();
     setView('off', 'Disconnecting…', '');
@@ -257,6 +279,8 @@
       setView('on', c ? `Connected · ${c.country}` : 'Connected', c ? c.host : '');
       if (wasAttempt) { toast(c ? `Connected to ${c.country}` : 'Connected'); setTimeout(checkIp, 1500); }
       render();
+    } else if (s.state === 'FAILED') {
+      if (st.attempt) nextServer(s.msg || 'server did not answer');
     } else if (lvl === 'LEVEL_AUTH_FAILED') {
       if (st.attempt) nextServer('server refused login');
     } else if (st.attempt) {
@@ -308,6 +332,7 @@
       $('#tot').textContent = bytes(d.in + d.out);
     } else if (ev === 'ip') onIp(d);
     else if (ev === 'ipError') $('#iploc').textContent = 'Could not check IP';
+    else if (ev === 'probe') onProbe(d);
     else if (ev === 'connectError') {
       if (d.permission) { clearAttempt(); setView('off', 'Not connected', ''); showErr('SRK VPN needs the Android VPN permission to connect. Tap a country and choose OK.'); render(); }
       else if (st.attempt) nextServer(d.error);
@@ -324,7 +349,7 @@
     else if (btn.dataset.act === 'server') connectServer(btn.dataset.id);
   });
   $('#power').addEventListener('click', () => {
-    if (st.view !== 'off') return disconnect();
+    if (st.view !== 'off' || st.probing) return disconnect();
     if (!st.servers.length) return toast('Server list is still loading');
     const last = st.current && st.byCountry.find(c => c.cc === st.current.cc);
     connectCountry(last ? last.cc : [...st.byCountry].sort((a, b) => b.bestSpeed - a.bestSpeed)[0].cc);
@@ -350,6 +375,7 @@
       disconnect() { setTimeout(() => { state = { state: 'NOPROCESS', level: 'LEVEL_NOTCONNECTED' }; emit('state', state); }, 400); },
       state() { return JSON.stringify(state); },
       checkIp() { setTimeout(() => emit('ip', state.level === 'LEVEL_CONNECTED' ? { ip: '219.100.37.12', cc: 'JP', country: 'Japan', city: 'Tokyo', isp: 'Volunteer relay' } : { ip: '49.37.200.10', cc: 'IN', country: 'India', city: 'Chennai', isp: 'Your ISP' }), 400); },
+      probe(ids) { setTimeout(() => emit('probe', { results: Object.fromEntries(JSON.parse(ids).map((id, i) => [id, i % 3 === 0 ? -1 : 40 + ((i * 37) % 120)])) }), 600); },
       toast() {}
     };
   }

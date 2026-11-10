@@ -20,6 +20,15 @@ sealed class OpenVpnRunner
     int mgmtPort;
     TcpClient mgmt;
     long lastIn, lastOut;
+    bool connected;
+    int failedGen = -1;
+
+    /// <summary>Reports a failed connection attempt once per attempt.</summary>
+    void Fail(int gen, string why)
+    {
+        lock (sync) { if (gen != generation || failedGen == gen || connected) return; failedGen = gen; }
+        StateChanged?.Invoke("FAILED", "LEVEL_NOTCONNECTED", why);
+    }
 
     public bool Running { get { lock (sync) return proc != null && !proc.HasExited; } }
 
@@ -80,7 +89,9 @@ sealed class OpenVpnRunner
             var t = raw.Trim();
             if (t.StartsWith("cipher ")) cipher = t[7..].Trim();
             // options we set ourselves below
-            if (t.StartsWith("management") || t.StartsWith("windows-driver") || t.StartsWith("data-ciphers")) continue;
+            if (t.StartsWith("management") || t.StartsWith("windows-driver") || t.StartsWith("data-ciphers")
+                || t.StartsWith("connect-retry") || t.StartsWith("resolv-retry") || t.StartsWith("server-poll-timeout")
+                || t.StartsWith("hand-window") || t.StartsWith("ip-win32") || t.StartsWith("connect-timeout")) continue;
             sb.Append(raw.TrimEnd()).Append('\n');
         }
         // VPN Gate relays run SoftEther with older OpenVPN settings: use the TAP driver (no DCO for CBC),
@@ -97,6 +108,14 @@ sealed class OpenVpnRunner
         sb.Append($"data-ciphers {ciphers}\n");
         sb.Append("tls-cert-profile insecure\n");
         sb.Append("block-outside-dns\n");
+        // Fail fast on dead relays so the app can move to the next server instead of waiting minutes.
+        sb.Append("server-poll-timeout 8\n");
+        sb.Append("connect-retry 1\n");
+        sb.Append("connect-retry-max 1\n");
+        sb.Append("resolv-retry 5\n");
+        sb.Append("hand-window 15\n");
+        // Set the adapter address directly instead of waiting for Windows DHCP on the TAP adapter.
+        sb.Append("ip-win32 netsh\n");
         sb.Append($"management 127.0.0.1 {mgmtPort}\n");
         sb.Append("verb 3\n");
 
@@ -111,10 +130,18 @@ sealed class OpenVpnRunner
         };
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         int gen;
-        lock (sync) { gen = ++generation; proc = p; }
+        lock (sync) { gen = ++generation; proc = p; connected = false; }
         p.OutputDataReceived += (_, e) => OnLine(gen, e.Data);
         p.ErrorDataReceived += (_, e) => OnLine(gen, e.Data);
-        p.Exited += (_, _) => { if (Current(gen)) { CloseMgmt(); StateChanged?.Invoke("NOPROCESS", "LEVEL_NOTCONNECTED", "OpenVPN stopped"); } };
+        p.Exited += (_, _) =>
+        {
+            if (!Current(gen)) return;
+            CloseMgmt();
+            bool wasUp;
+            lock (sync) wasUp = connected;
+            if (wasUp) StateChanged?.Invoke("NOPROCESS", "LEVEL_NOTCONNECTED", "OpenVPN stopped");
+            else Fail(gen, "server did not answer");
+        };
         File.WriteAllText(Path.Combine(App.DataDir, "openvpn.log"), $"SRK VPN — {label}\n");
         p.Start();
         p.BeginOutputReadLine();
@@ -131,7 +158,14 @@ sealed class OpenVpnRunner
         try { File.AppendAllText(Path.Combine(App.DataDir, "openvpn.log"), line + "\n"); } catch { }
         if (!Current(gen)) return;
         if (line.Contains("Initialization Sequence Completed"))
+        {
+            lock (sync) connected = true;
             StateChanged?.Invoke("CONNECTED", "LEVEL_CONNECTED", "");
+        }
+        else if (line.Contains("TLS key negotiation failed") || line.Contains("TLS Error")
+                 || line.Contains("Connection refused") || line.Contains("Connection reset")
+                 || line.Contains("Exiting due to fatal error") || line.Contains("Cannot load"))
+            Fail(gen, "server did not answer");
         else if (line.Contains("AUTH_FAILED"))
             StateChanged?.Invoke("AUTH_FAILED", "LEVEL_AUTH_FAILED", line);
         else if (line.Contains("TLS: Initial packet"))

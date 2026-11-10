@@ -47,6 +47,7 @@ sealed class MainForm : Form
     disconnect: () => post('disconnect'),
     state: () => st,
     checkIp: () => post('checkIp'),
+    probe: ids => post('probe', ids),
     toast: m => post('toast', m),
   };
 })();";
@@ -138,12 +139,56 @@ sealed class MainForm : Form
             case "disconnect":
                 _ = Task.Run(() => vpn.Stop(wait: true));
                 break;
+            case "probe":
+                _ = Task.Run(() => ProbeAsync(arg));
+                break;
             case "checkIp":
                 _ = Task.Run(CheckIpAsync);
                 break;
             case "toast":
                 break;
         }
+    }
+
+    /// <summary>Measures how quickly each server answers from this PC (TCP connect time), in parallel.</summary>
+    async Task ProbeAsync(string idsJson)
+    {
+        var results = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
+        try
+        {
+            var ids = JsonSerializer.Deserialize<string[]>(idsJson) ?? Array.Empty<string>();
+            await Task.WhenAll(ids.Select(async id =>
+            {
+                var s = gate.Get(id);
+                if (s == null) return;
+                // TCP servers: their OpenVPN port. UDP servers: SoftEther also listens on TCP 443/992.
+                var ports = new List<int>();
+                if (s.Proto.StartsWith("tcp") && int.TryParse(s.Port, out var tp)) ports.Add(tp);
+                ports.Add(443); ports.Add(992);
+                int best = -1;
+                foreach (var port in ports.Distinct())
+                {
+                    int ms = await TcpPingAsync(s.Ip, port, 2500);
+                    if (ms > 0) { best = ms; break; }
+                }
+                results[id] = best;
+            }));
+        }
+        catch { }
+        Emit("probe", JsonSerializer.Serialize(new { results }));
+    }
+
+    static async Task<int> TcpPingAsync(string ip, int port, int timeoutMs)
+    {
+        try
+        {
+            using var c = new System.Net.Sockets.TcpClient();
+            using var cts = new CancellationTokenSource(timeoutMs);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await c.ConnectAsync(ip, port, cts.Token);
+            return Math.Max(1, (int)sw.ElapsedMilliseconds);
+        }
+        catch { return -1; }
     }
 
     async Task CheckIpAsync()
