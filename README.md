@@ -8,6 +8,13 @@ SRK VPN changes your IP address to another country using free **VPN Gate** serve
 - Pick an exact server, live traffic counters, and "Check IP" to confirm your new country
 - OpenVPN engine: [ics-openvpn](https://github.com/schwabe/ics-openvpn) (GPLv2), built from its `skeleton` flavor
 
+## Windows 10/11
+
+`windows/` holds the Windows app (C# + WebView2) that shows the same screen as the phone app and
+runs the official OpenVPN engine. **Actions → Build Windows installer** publishes `SRK-VPN-Setup.exe`
+under **Releases**; the installer also installs OpenVPN and its TAP network driver if they are missing.
+The app asks for administrator permission when it opens, because Windows needs it to set VPN routes.
+
 ## Build
 
 Every push to `main` runs **Actions → Build APK** and publishes `SRK-VPN.apk` under **Releases**.

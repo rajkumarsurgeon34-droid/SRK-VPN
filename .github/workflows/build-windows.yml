@@ -1,0 +1,86 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "windows/**"
+      - "overlay/skeleton/assets/www/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build SRK VPN app
+        run: dotnet publish windows/SRKVPN.csproj -c Release -r win-x64 --self-contained true -o publish
+
+      - name: Get official OpenVPN installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $h = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "srk-vpn-build" }
+          $url = $null
+          foreach ($repo in @("OpenVPN/openvpn-build", "OpenVPN/openvpn")) {
+            try {
+              $rels = Invoke-RestMethod -Headers $h "https://api.github.com/repos/$repo/releases?per_page=30"
+              foreach ($r in $rels) {
+                if ($r.prerelease -or $r.draft) { continue }
+                $a = $r.assets | Where-Object { $_.name -match '^OpenVPN-[\d\.]+-I\d+-amd64\.msi$' } | Select-Object -First 1
+                if ($a) { $url = $a.browser_download_url; Write-Host "Found in $repo release $($r.tag_name)"; break }
+              }
+            } catch { Write-Host "Lookup in $repo failed: $_" }
+            if ($url) { break }
+          }
+          if (-not $url) {
+            foreach ($v in @("2.7.5-I001","2.7.4-I001","2.7.3-I001","2.6.16-I001","2.6.15-I001","2.6.14-I001")) {
+              $try = "https://swupdate.openvpn.org/community/releases/OpenVPN-$v-amd64.msi"
+              try { Invoke-WebRequest -Method Head $try -UseBasicParsing | Out-Null; $url = $try; break } catch { }
+            }
+          }
+          if (-not $url) { throw "Could not find the OpenVPN Windows installer" }
+          Write-Host "OpenVPN MSI: $url"
+          New-Item -ItemType Directory deps -Force | Out-Null
+          Invoke-WebRequest $url -OutFile deps\openvpn.msi -UseBasicParsing
+          Get-Item deps\openvpn.msi | Format-List Name, Length
+          "OPENVPN_MSI=$url" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $iscc) { choco install innosetup -y --no-progress | Out-Null
+              $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" | Select-Object -First 1 }
+            $iscc = $iscc.FullName
+          } else { $iscc = "iscc" }
+          & $iscc "/DAppVersion=1.0.${{ github.run_number }}" windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-Item out\SRK-VPN-Setup.exe | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: SRK-VPN-Windows
+          path: out/SRK-VPN-Setup.exe
+
+      - name: Publish download (Releases)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-build-${{ github.run_number }}
+          name: SRK VPN for Windows — build ${{ github.run_number }}
+          body: |
+            Run SRK-VPN-Setup.exe on Windows 10/11 (64-bit).
+            Includes the official OpenVPN engine (${{ env.OPENVPN_MSI }}), installed automatically if missing.
+          files: out/SRK-VPN-Setup.exe
