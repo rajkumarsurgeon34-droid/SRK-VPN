@@ -50,18 +50,12 @@ jobs:
           yes | "$SM" --sdk_root="$SDK" --licenses > /dev/null || true
           echo "sdk.dir=$SDK" > engine/local.properties
           # SRK release key (same as the other SRK apps), decrypted with the SRK_SIGNING_PASSWORD
-          # secret and placed where the engine's -PicsopenvpnDebugSign build expects its key.
+          # secret. Passed to the engine's own "releaseOvpn2" signing config at build time.
           if [ -z "$SRK_KEY_PASSWORD" ]; then
             echo "::error::Missing secret SRK_SIGNING_PASSWORD (repo Settings > Secrets and variables > Actions)"; exit 1
           fi
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/srk-release.keystore.enc \
-            -out "$RUNNER_TEMP/srk.p12" -pass env:SRK_KEY_PASSWORD
-          mkdir -p ~/.android
-          keytool -importkeystore -noprompt -srckeystore "$RUNNER_TEMP/srk.p12" -srcstoretype PKCS12 \
-            -srcstorepass:env SRK_KEY_PASSWORD -srcalias srk \
-            -destkeystore ~/.android/debug.keystore -deststoretype PKCS12 \
-            -deststorepass android -destkeypass android -destalias androiddebugkey
-          rm -f "$RUNNER_TEMP/srk.p12"
+            -out "$RUNNER_TEMP/srk-release.p12" -pass env:SRK_KEY_PASSWORD
 
       - uses: gradle/actions/setup-gradle@v5
         with:
@@ -70,7 +64,20 @@ jobs:
 
       - name: Build APK
         working-directory: engine
-        run: gradle :main:assembleSkeletonOvpn2Release -PicsopenvpnDebugSign --stacktrace
+        env:
+          ORG_GRADLE_PROJECT_keystoreO2Password: ${{ secrets.SRK_SIGNING_PASSWORD }}
+          ORG_GRADLE_PROJECT_keystoreO2AliasPassword: ${{ secrets.SRK_SIGNING_PASSWORD }}
+        run: |
+          gradle :main:assembleSkeletonOvpn2Release --stacktrace \
+            -PkeystoreO2File="$RUNNER_TEMP/srk-release.p12" -PkeystoreO2Alias=srk
+
+      - name: Check the signing key
+        run: |
+          APK=$(find engine/main/build/outputs/apk -name '*.apk' | grep -i release | head -1)
+          BT=$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | tee certs.txt
+          grep -qi "SHA-256 digest: 3b06e91fa88c9b4f9b767781029b132e563782ab6c099d85ce00b609124e4dab" certs.txt \
+            || { echo "::error::APK is not signed with the SRK release key"; exit 1; }
 
       - name: Collect APK
         run: |
