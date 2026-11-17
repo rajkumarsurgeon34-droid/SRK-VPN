@@ -7,6 +7,8 @@ on:
       - "windows/**"
       - ".github/workflows/build-windows.yml"
       - "README.md"
+      - ".github/workflows/collect-servers.yml"
+      - "scripts/collect-servers.py"
   workflow_dispatch:
 
 permissions:
@@ -40,13 +42,26 @@ jobs:
         run: bash scripts/patch-engine.sh engine
 
       - name: Android SDK licences and signing key
+        env:
+          SRK_KEY_PASSWORD: ${{ secrets.SRK_SIGNING_PASSWORD }}
         run: |
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           SM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager | head -1)
           yes | "$SM" --sdk_root="$SDK" --licenses > /dev/null || true
           echo "sdk.dir=$SDK" > engine/local.properties
+          # SRK release key (same as the other SRK apps), decrypted with the SRK_SIGNING_PASSWORD
+          # secret and placed where the engine's -PicsopenvpnDebugSign build expects its key.
+          if [ -z "$SRK_KEY_PASSWORD" ]; then
+            echo "::error::Missing secret SRK_SIGNING_PASSWORD (repo Settings > Secrets and variables > Actions)"; exit 1
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/srk-release.keystore.enc \
+            -out "$RUNNER_TEMP/srk.p12" -pass env:SRK_KEY_PASSWORD
           mkdir -p ~/.android
-          cp signing/srk-vpn-debug.keystore ~/.android/debug.keystore
+          keytool -importkeystore -noprompt -srckeystore "$RUNNER_TEMP/srk.p12" -srcstoretype PKCS12 \
+            -srcstorepass:env SRK_KEY_PASSWORD -srcalias srk \
+            -destkeystore ~/.android/debug.keystore -deststoretype PKCS12 \
+            -deststorepass android -destkeypass android -destalias androiddebugkey
+          rm -f "$RUNNER_TEMP/srk.p12"
 
       - uses: gradle/actions/setup-gradle@v5
         with:
@@ -73,7 +88,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: SRK VPN build ${{ github.run_number }}
+          name: SRK VPN 1.0.${{ github.run_number }}
           body: |
             Install SRK-VPN.apk on your Android phone.
             Free country servers from VPN Gate, OpenVPN engine by ics-openvpn (GPLv2).

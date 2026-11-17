@@ -21,8 +21,13 @@ Every push to `main` runs **Actions → Build APK** and publishes `SRK-VPN.apk` 
 
 The workflow clones ics-openvpn at `ENGINE_TAG`, copies `overlay/skeleton/` into
 `main/src/skeleton/` (`scripts/patch-engine.sh`), sets the app id `in.shazverse.srkvpn`,
-and builds `:main:assembleSkeletonOvpn2Release`. `signing/srk-vpn-debug.keystore` keeps
-the signature the same between builds so updates install over the previous version.
+and builds `:main:assembleSkeletonOvpn2Release`. Builds are signed with the SRK release key
+(`signing/srk-release.keystore.enc`, decrypted using the `SRK_SIGNING_PASSWORD` secret), the same
+key as the other SRK apps, so updates install over the previous version.
+
+The **Collect free servers** workflow runs every hour: it downloads the VPN Gate list, keeps every
+server seen in the last 48 hours and publishes it on the `server-list` branch. Both apps load that
+list together with the live VPN Gate list, for many more servers and countries.
 
 ## Files
 

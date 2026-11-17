@@ -1,0 +1,43 @@
+name: Collect free servers
+
+# Every hour: download VPN Gate's list and merge it with the last 48 hours of servers,
+# then publish the result on the "server-list" branch. SRK VPN (Android + Windows)
+# downloads it from there, which gives many more servers and countries than one
+# VPN Gate download, and still works when vpngate.net itself is blocked.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-servers
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Get previous list
+        run: |
+          mkdir -p out
+          git fetch --depth 1 origin server-list && git show origin/server-list:seen.json > out/seen.json || echo "first run"
+
+      - name: Collect
+        run: python3 scripts/collect-servers.py out
+
+      - name: Publish to server-list branch
+        run: |
+          cd out
+          git init -q -b server-list
+          git config user.name "SRK VPN collector"
+          git config user.email "actions@users.noreply.github.com"
+          printf '# SRK VPN server list\nUpdated hourly by the "Collect free servers" workflow. Servers from VPN Gate (University of Tsukuba).\n' > README.md
+          git add vpngate.csv seen.json README.md
+          git commit -q -m "Server list $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" server-list

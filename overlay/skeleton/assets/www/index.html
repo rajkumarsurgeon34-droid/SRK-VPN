@@ -21,6 +21,12 @@
   .icon-btn:active{background:var(--panel)}
   .icon-btn svg{width:22px;height:22px}
   .spin svg{animation:spin 1s linear infinite}
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 4px}
+  .act{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border-radius:14px;font-weight:700;font-size:15.5px;transition:.2s}
+  .act svg{width:19px;height:19px}
+  .act.connect{background:var(--accent);color:#0B1020}
+  .act.disconnect{background:transparent;color:var(--bad);border:2px solid var(--bad)}
+  .act:disabled{opacity:.35;cursor:default}
   @keyframes spin{to{transform:rotate(360deg)}}
 
   .hero{background:radial-gradient(120% 90% at 50% 0%,#17254a 0%,var(--panel) 60%);border:1px solid var(--line);border-radius:22px;padding:22px 18px 18px;text-align:center;margin-top:6px}
@@ -99,7 +105,11 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1011.4 0"/></svg>
   </button>
   <div class="status" id="status">Not connected</div>
-  <div class="sub" id="sub">Tap a country below, or the button for the fastest server</div>
+  <div class="sub" id="sub">Tap Connect for the fastest server, or pick a country below</div>
+  <div class="actions">
+    <button class="act connect" id="btnConnect"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1011.4 0"/></svg>Connect</button>
+    <button class="act disconnect" id="btnDisconnect" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>Disconnect</button>
+  </div>
   <div class="traffic"><span>↓ <b id="down">0 B/s</b></span><span>↑ <b id="up">0 B/s</b></span><span>Total <b id="tot">0 B</b></span></div>
   <div class="ipbox">
     <div class="flag" id="ipflag">🌐</div>
@@ -268,6 +278,13 @@
     $('#hero').className = 'hero st-' + (view === 'on' ? 'connected' : view === 'connecting' ? 'connecting' : 'off');
     $('#status').textContent = status;
     $('#sub').textContent = sub ?? '';
+    updateButtons();
+  }
+  function updateButtons() {
+    const busy = st.view !== 'off' || !!st.probing || !!st.attempt;
+    $('#btnConnect').disabled = busy;
+    $('#btnDisconnect').disabled = !busy;
+    $('#btnConnect').lastChild.textContent = st.view === 'connecting' ? 'Connecting…' : st.view === 'on' ? 'Connected' : 'Connect';
   }
 
   function onState(s) {
@@ -288,8 +305,8 @@
       const s2 = st.attempt.queue[st.attempt.idx];
       if (s2 && lvl !== 'LEVEL_NOTCONNECTED') $('#sub').textContent = `Server ${st.attempt.idx + 1} of ${st.attempt.queue.length} · ${friendly(s.state)}`;
     } else if (lvl === 'LEVEL_NOTCONNECTED' || lvl === 'LEVEL_NONETWORK') {
-      if (st.view !== 'off') { setView('off', lvl === 'LEVEL_NONETWORK' ? 'No network' : 'Not connected', 'Tap a country to connect'); render(); }
-      else if ($('#status').textContent === 'Disconnecting…') setView('off', 'Not connected', 'Tap a country to connect');
+      if (st.view !== 'off') { setView('off', lvl === 'LEVEL_NONETWORK' ? 'No network' : 'Not connected', 'Tap Connect or pick a country'); render(); }
+      else if ($('#status').textContent === 'Disconnecting…') setView('off', 'Not connected', 'Tap Connect or pick a country');
     } else if (lvl && lvl.startsWith('LEVEL_CONNECTING') || lvl === 'LEVEL_START' || lvl === 'LEVEL_WAITING_FOR_USER_INPUT') {
       // engine reconnecting on its own (e.g. network change)
       const c = st.current;
@@ -348,12 +365,17 @@
     else if (btn.dataset.act === 'country') connectCountry(cc);
     else if (btn.dataset.act === 'server') connectServer(btn.dataset.id);
   });
-  $('#power').addEventListener('click', () => {
-    if (st.view !== 'off' || st.probing) return disconnect();
+  function connectDefault() {
     if (!st.servers.length) return toast('Server list is still loading');
     const last = st.current && st.byCountry.find(c => c.cc === st.current.cc);
     connectCountry(last ? last.cc : [...st.byCountry].sort((a, b) => b.bestSpeed - a.bestSpeed)[0].cc);
+  }
+  $('#power').addEventListener('click', () => {
+    if (st.view !== 'off' || st.probing) return disconnect();
+    connectDefault();
   });
+  $('#btnConnect').addEventListener('click', () => { if (st.view === 'off' && !st.probing) connectDefault(); });
+  $('#btnDisconnect').addEventListener('click', () => { if (st.view !== 'off' || st.probing || st.attempt) disconnect(); });
   $('#refresh').addEventListener('click', () => loadServers(true));
   $('#checkip').addEventListener('click', checkIp);
   $('#search').addEventListener('input', e => { st.query = e.target.value; render(); });

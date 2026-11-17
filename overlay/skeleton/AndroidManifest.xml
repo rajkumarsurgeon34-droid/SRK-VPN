@@ -6,9 +6,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application
+        android:allowBackup="false"
         android:label="SRK VPN"
         android:usesCleartextTraffic="true"
-        tools:replace="android:label"
+        tools:replace="android:label,android:allowBackup"
         tools:ignore="AllowBackup,GoogleAppIndexingWarning">
 
         <activity

@@ -11,6 +11,8 @@ sealed class VpnGate
         "https://www.vpngate.net/api/iphone/",
         "http://www.vpngate.net/api/iphone/",
     };
+    // Every server VPN Gate listed in the last 48 hours, collected hourly by the "Collect free servers" workflow.
+    const string Collected = "https://raw.githubusercontent.com/rajkumarsurgeon34-droid/SRK-VPN/server-list/vpngate.csv";
 
     public sealed class Server
     {
@@ -45,16 +47,26 @@ sealed class VpnGate
         }
         if (csv == null)
         {
+            // Live list and the collected 48-hour list, downloaded together; live entries win duplicates.
+            var collectedTask = DownloadAsync(Collected);
+            string live = null;
             foreach (var src in Sources)
             {
                 try
                 {
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    var text = await http.GetStringAsync(src, cts.Token);
-                    if (text.Contains("OpenVPN_ConfigData_Base64")) { csv = text; break; }
+                    var text = await DownloadAsync(src);
+                    if (text.Contains("OpenVPN_ConfigData_Base64")) { live = text; break; }
                 }
                 catch (Exception e) { last = e; }
             }
+            string collected = null;
+            try
+            {
+                var text = await collectedTask;
+                if (text.Contains("OpenVPN_ConfigData_Base64")) collected = text;
+            }
+            catch (Exception e) { last ??= e; }
+            csv = live != null && collected != null ? live + "\n" + collected : live ?? collected;
             if (csv != null)
             {
                 await File.WriteAllTextAsync(cache, csv);
@@ -69,6 +81,12 @@ sealed class VpnGate
             else throw last ?? new Exception("Server list unavailable");
         }
         return Parse(csv, fetched, fromCache);
+    }
+
+    async Task<string> DownloadAsync(string url)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        return await http.GetStringAsync(url, cts.Token);
     }
 
     string Parse(string csv, DateTime fetched, bool fromCache)

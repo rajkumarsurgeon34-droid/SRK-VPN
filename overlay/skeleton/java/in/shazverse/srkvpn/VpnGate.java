@@ -25,10 +25,15 @@ import java.util.Map;
  * and keeps each server's OpenVPN config in memory, keyed by id.
  */
 final class VpnGate {
+    /** Live VPN Gate list: about 100 servers, a different set on each download. */
     private static final String[] SOURCES = {
             "https://www.vpngate.net/api/iphone/",
             "http://www.vpngate.net/api/iphone/",
     };
+    /** Every server VPN Gate listed in the last 48 hours, collected hourly by the
+     *  "Collect free servers" GitHub workflow — many more servers and countries. */
+    private static final String COLLECTED =
+            "https://raw.githubusercontent.com/rajkumarsurgeon34-droid/SRK-VPN/server-list/vpngate.csv";
     private static final String CACHE = "vpngate-cache.csv";
 
     static final class Server {
@@ -55,13 +60,21 @@ final class VpnGate {
             fetchedAt = cache.lastModified();
         }
         if (csv == null) {
+            // Live list first (freshest numbers win when a server is in both), then the collected list.
+            String live = null, collected = null;
             for (String src : SOURCES) {
                 try {
-                    csv = download(src);
-                    if (csv != null && csv.contains("OpenVPN_ConfigData_Base64")) break;
-                    csv = null;
+                    live = download(src);
+                    if (live != null && live.contains("OpenVPN_ConfigData_Base64")) break;
+                    live = null;
                 } catch (Exception e) { last = e; }
             }
+            try {
+                collected = download(COLLECTED);
+                if (collected != null && !collected.contains("OpenVPN_ConfigData_Base64")) collected = null;
+            } catch (Exception e) { if (last == null) last = e; }
+            if (live != null && collected != null) csv = live + "\n" + collected;
+            else csv = live != null ? live : collected;
             if (csv != null) {
                 try (FileOutputStream out = new FileOutputStream(cache)) { out.write(csv.getBytes(StandardCharsets.UTF_8)); }
                 fromCache = false;
